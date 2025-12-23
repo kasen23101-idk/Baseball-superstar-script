@@ -1,58 +1,66 @@
--- AutoSwing.lua (Draggable & Mobile-Friendly)
--- Author: Kasen102399
+-- AutoSwing.lua (SMOOTH TRAJECTORY + CLEAN TOGGLE UI - ALL OFF BY DEFAULT)
+-- Author: Original by Kasen102399 | SMOOTH Trajectory + Toggle UI - ALL FEATURES OFF
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 
--- RemoteEvents
-local pitchEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("PitchCrossedPlate")
-local swingEvent = ReplicatedStorage:WaitForChild("RemoteEvents"):WaitForChild("SwingBat")
+-- RemoteEvents (REAL args format)
+local remoteFolder = ReplicatedStorage:WaitForChild("RemoteEvents")
+local pitchEvent = remoteFolder:WaitForChild("PitchCrossedPlate")
+local swingEvent = remoteFolder:WaitForChild("SwingBat")
 
--- Settings
+-- Settings (ALL OFF BY DEFAULT)
 local COOLDOWN = 0.35
-local PREDICTION_STEPS = 12
+local PREDICTION_STEPS = 25
 local DETECTION_RADIUS = 15
 local GRAVITY = workspace.Gravity
 local lastSwing = 0
-local autoSwingEnabled = false
-local strikeZoneEnabled = true
+local autoSwingEnabled = false  -- OFF
+local ballEspEnabled = false    -- OFF
+local trajectoryEnabled = false -- OFF
+local showTrajectoryUI = false  -- OFF
 
-local STRIKE_ZONE = {minX=-2,maxX=2,minY=1.5,maxY=4,minZ=4,maxZ=10}
+-- Trajectory Visuals (SMOOTHED)
+local trajectoryParts = {}
+local currentTrajectoryBall = nil
 
--- GUI
+-- CLEAN Trajectory UI (Toggleable Overlay)
 local playerGui = player:WaitForChild("PlayerGui")
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "DeltaMenu"
-screenGui.Parent = playerGui
 screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
 
+-- Main Control Panel (Compact)
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.fromOffset(300,380) -- Slightly larger for mobile
-mainFrame.Position = UDim2.fromScale(0.05,0.2)
-mainFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+mainFrame.Size = UDim2.fromOffset(280, 380)
+mainFrame.Position = UDim2.fromScale(0.02, 0.1)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 
--- Mobile & draggable support
-local dragging = false
-local dragInput, mousePos, framePos
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 16)
+mainCorner.Parent = mainFrame
 
-local function startDrag(input)
-    dragging = true
-    mousePos = input.Position
-    framePos = mainFrame.Position
-    input.Changed:Connect(function()
-        if input.UserInputState == Enum.UserInputState.End then
-            dragging = false
-        end
-    end)
-end
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(60, 60, 70)
+mainStroke.Thickness = 1
+mainStroke.Parent = mainFrame
 
+-- Draggable
+local dragging, dragInput, mousePos, framePos
 mainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        startDrag(input)
+        dragging = true
+        mousePos = input.Position
+        framePos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
     end
 end)
 
@@ -69,7 +77,301 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- TextLabel helper
-local function createTextLabel(parent,text,positionY)
+-- UI Helpers
+local function createLabel(parent, text, posY)
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.fromScale(1,0.08)
+    label.Size = UDim2.fromScale(1, 0.07)
+    label.Position = UDim2.fromScale(0, posY)
+    label.Text = text
+    label.TextScaled = true
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.GothamBold
+    label.Parent = parent
+    return label
+end
+
+local function createToggle(parent, name, posY, default, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.fromScale(0.9, 0.07)
+    frame.Position = UDim2.fromScale(0.05, posY)
+    frame.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    frame.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(0.7, 1)
+    label.Position = UDim2.fromScale(0.05, 0)
+    label.Text = name .. ": OFF"  -- SHOWS OFF BY DEFAULT
+    label.TextScaled = true
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+    
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.fromScale(0.25, 0.8)
+    toggleBtn.Position = UDim2.fromScale(0.72, 0.1)
+    toggleBtn.Text = ""
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 110)  -- OFF COLOR
+    toggleBtn.Parent = frame
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = toggleBtn
+    
+    toggleBtn.MouseButton1Click:Connect(function()
+        default = not default
+        label.Text = name .. ": " .. (default and "ON" or "OFF")
+        toggleBtn.BackgroundColor3 = default and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 110)
+        callback(default)
+    end)
+    return frame
+end
+
+-- Build Main UI (ALL SHOW OFF)
+createLabel(mainFrame, "⚾ Delta AutoSwing", 0.02)
+createLabel(mainFrame, "ALL FEATURES OFF", 0.09)
+
+createToggle(mainFrame, "Auto Swing", 0.17, autoSwingEnabled, function(v) autoSwingEnabled = v end)
+createToggle(mainFrame, "Ball ESP", 0.27, ballEspEnabled, function(v) ballEspEnabled = v end)
+createToggle(mainFrame, "Trajectory", 0.37, trajectoryEnabled, function(v) trajectoryEnabled = v end)
+createToggle(mainFrame, "Trajectory UI", 0.47, showTrajectoryUI, function(v) showTrajectoryUI = v end)
+
+-- Sliders (Compact)
+local function createSlider(parent, name, min, max, default, posY, callback)
+    createLabel(parent, name .. ": " .. default, posY)
+    local slider = Instance.new("Frame")
+    slider.Size = UDim2.fromScale(0.9, 0.035)
+    slider.Position = UDim2.fromScale(0.05, posY + 0.075)
+    slider.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 4)
+    sliderCorner.Parent = slider
+    slider.Parent = parent
+    
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default - min)/(max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 4)
+    fillCorner.Parent = fill
+    fill.Parent = slider
+    
+    local function update(val)
+        val = math.clamp(val, min, max)
+        fill.Size = UDim2.new((val - min)/(max - min), 0, 1, 0)
+        callback(val)
+    end
+    
+    slider.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            local conn
+            local function onMove(input2)
+                local ratio = math.clamp((input2.Position.X - slider.AbsolutePosition.X)/slider.AbsoluteSize.X, 0, 1)
+                update(min + ratio * (max - min))
+            end
+            onMove(input)
+            conn = input.Changed:Connect(onMove)
+            input.InputEnded:Connect(function() if conn then conn:Disconnect() end end)
+        end
+    end)
+end
+
+createSlider(mainFrame, "Cooldown", 0.05, 1, COOLDOWN, 0.57, function(v) COOLDOWN = v end)
+createSlider(mainFrame, "Pred Steps", 10, 50, PREDICTION_STEPS, 0.67, function(v) PREDICTION_STEPS = math.floor(v) end)
+createSlider(mainFrame, "Radius", 5, 50, DETECTION_RADIUS, 0.77, function(v) DETECTION_RADIUS = v end)
+
+-- SMOOTH Trajectory UI (Hidden by Default)
+local trajUI = Instance.new("Frame")
+trajUI.Size = UDim2.fromScale(0.3, 0.15)
+trajUI.Position = UDim2.fromScale(0.35, 0.02)
+trajUI.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+trajUI.BackgroundTransparency = 0.4
+trajUI.BorderSizePixel = 0
+trajUI.Visible = false  -- HIDDEN BY DEFAULT
+trajUI.Parent = screenGui
+
+local trajCorner = Instance.new("UICorner")
+trajCorner.CornerRadius = UDim.new(0, 12)
+trajCorner.Parent = trajUI
+
+local trajStroke = Instance.new("UIStroke")
+trajStroke.Color = Color3.fromRGB(0, 255, 255)
+trajStroke.Thickness = 2
+trajStroke.Transparency = 0.5
+trajStroke.Parent = trajUI
+
+local trajLabel = Instance.new("TextLabel")
+trajLabel.Size = UDim2.fromScale(1, 1)
+trajLabel.Text = "TRAJECTORY\nPREDICTING..."
+trajLabel.TextScaled = true
+trajLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+trajLabel.BackgroundTransparency = 1
+trajLabel.Font = Enum.Font.GothamBold
+trajLabel.TextStrokeTransparency = 0
+trajLabel.TextStrokeColor3 = Color3.new(0,0,0)
+trajLabel.Parent = trajUI
+
+-- SMOOTH Trajectory Visuals
+local function clearTrajectory()
+    for _, part in pairs(trajectoryParts) do
+        if part and part.Parent then
+            part:Destroy()
+        end
+    end
+    trajectoryParts = {}
+    currentTrajectoryBall = nil
+end
+
+local function predictTrajectory(ball, steps)
+    local positions = {}
+    local pos = ball.Position
+    local vel = ball.AssemblyLinearVelocity
+    local dt = 0.02  -- Smoother timestep
+    
+    for i = 1, steps do
+        vel = vel + Vector3.new(0, -GRAVITY * dt, 0)
+        pos = pos + vel * dt
+        positions[#positions + 1] = pos
+    end
+    return positions
+end
+
+local function drawSmoothTrajectory(positions)
+    clearTrajectory()
+    
+    -- Ultra-smooth gradient trail (50 segments)
+    local segments = math.min(50, #positions)
+    for i = 1, segments do
+        local alpha = 1 - (i / segments)
+        local t = (i - 1) / (segments - 1)
+        local pos = positions[math.floor(t * #positions) + 1]
+        
+        local part = Instance.new("Part")
+        part.Name = "TrajSeg" .. i
+        part.Anchored = true
+        part.CanCollide = false
+        part.Size = Vector3.new(0.4 * alpha, 0.4 * alpha, 0.4 * alpha)
+        part.Position = pos
+        part.Color = Color3.fromRGB(0, 255 - i * 4, 255)
+        part.Material = Enum.Material.Neon
+        part.Shape = Enum.PartType.Ball
+        part.Parent = workspace
+        trajectoryParts[#trajectoryParts + 1] = part
+        
+        -- Smooth fade animation
+        TweenService:Create(part, TweenInfo.new(1.5, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), {
+            Size = Vector3.new(0.1, 0.1, 0.1),
+            Transparency = 1
+        }):Play()
+    end
+end
+
+-- Ball ESP
+local ballEspAdornments = {}
+local function updateBallEsp()
+    for _, adorn in pairs(ballEspAdornments) do adorn:Destroy() end
+    ballEspAdornments = {}
+    
+    if not ballEspEnabled then return end
+    
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+    
+    local ballsFolder = workspace:FindFirstChild("Balls")
+    if not ballsFolder then return end
+    
+    for _, ball in ipairs(ballsFolder:GetChildren()) do
+        if ball:IsA("BasePart") then
+            local outline = Instance.new("SelectionBox")
+            outline.Adornee = ball
+            outline.Color3 = Color3.fromRGB(0, 255, 100)
+            outline.Transparency = 0.3
+            outline.LineThickness = 0.2
+            outline.Parent = playerGui
+            ballEspAdornments[#ballEspAdornments + 1] = outline
+        end
+    end
+end
+
+-- REAL FireServer Args
+local function firePitch(pos)
+    pitchEvent:FireServer(Vector3.new(pos.X, pos.Y, pos.Z))
+end
+
+local function fireSwing(targetPos)
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+    
+    local origin = Vector3.new(hrp.Position.X, hrp.Position.Y, hrp.Position.Z)
+    local direction = (targetPos - hrp.Position).Unit
+    
+    swingEvent:FireServer(origin, Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), direction, "Contact")
+end
+
+local function getClosestBall()
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    local hrp = char.HumanoidRootPart
+    local closest, bestDist = nil, DETECTION_RADIUS
+    
+    local ballsFolder = workspace:FindFirstChild("Balls")
+    if not ballsFolder then return nil end
+    
+    for _, ball in ipairs(ballsFolder:GetChildren()) do
+        if ball:IsA("BasePart") then
+            local dist = (ball.Position - hrp.Position).Magnitude
+            if dist < bestDist then
+                bestDist = dist
+                closest = ball
+            end
+        end
+    end
+    return closest
+end
+
+-- MAIN LOOP (60FPS Smooth)
+RunService.RenderStepped:Connect(function()
+    updateBallEsp()
+    
+    local ball = getClosestBall()
+    if trajectoryEnabled and ball then
+        currentTrajectoryBall = ball
+        local trajectory = predictTrajectory(ball, PREDICTION_STEPS)
+        drawSmoothTrajectory(trajectory)
+        
+        if showTrajectoryUI then
+            trajUI.Visible = true
+            local dist = math.floor((ball.Position - (player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character.HumanoidRootPart.Position or Vector3.new())).Magnitude)
+            trajLabel.Text = "TRJCTRY\n" .. dist .. "m → SWING"
+        else
+            trajUI.Visible = false
+        end
+    else
+        clearTrajectory()
+        trajUI.Visible = false
+        currentTrajectoryBall = nil
+    end
+    
+    if not autoSwingEnabled or not ball then return end
+    if tick() - lastSwing < COOLDOWN then return end
+    
+    local trajectory = predictTrajectory(ball, PREDICTION_STEPS)
+    if #trajectory > 0 then
+        lastSwing = tick()
+        local finalPos = trajectory[#trajectory]
+        firePitch(finalPos)
+        fireSwing(finalPos)
+    end
+end)
+
+player.CharacterAdded:Connect(function() task.wait(1) clearTrajectory() end)
+
+print("✅ Delta AutoSwing LOADED - ALL FEATURES OFF BY DEFAULT! Toggle ON to activate! 🎯")
